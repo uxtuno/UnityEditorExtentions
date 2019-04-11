@@ -23,7 +23,6 @@ public class SearchableInspectorWindow : EditorWindow
 	Assembly gameAssembly;
 	Assembly unityEditorAssembly;
 
-
 	ActiveEditorTracker editorTracker;
 	ActiveEditorTracker EditorTracker {
 		get
@@ -64,7 +63,7 @@ public class SearchableInspectorWindow : EditorWindow
 		public ShowInspectorInfo(Editor inspectorEditor, bool isShowCompontnt, bool isFoldout, List<ShowPropertyInfo> showProperties)
 		{
 			this.inspectorEditor = inspectorEditor;
-			this.isShowCompontnt = isShowCompontnt;
+			this.isShowComponent = isShowCompontnt;
 			this.isFoldout = isFoldout;
 			this.showProperties = showProperties;
 		}
@@ -77,7 +76,7 @@ public class SearchableInspectorWindow : EditorWindow
 		/// コンポーネント自体を表示するなら true
 		/// このフラグが false なら、コンポーネントのタイトルバー自体も非表示にする
 		/// </summary>
-		public bool isShowCompontnt;
+		public bool isShowComponent;
 
 		/// <summary>
 		/// コンポーネントが折り畳まれているなら true
@@ -124,6 +123,8 @@ public class SearchableInspectorWindow : EditorWindow
 	/// </summary>
 	MethodInfo findCustomEditorType;
 	object[] findCustomEditorTypeArg = new object[2];
+
+	bool includeInvisibleProperty = false;
 
 	/// <summary>
 	/// UnityEditor.GenericInspector をキャッシュ
@@ -232,9 +233,14 @@ public class SearchableInspectorWindow : EditorWindow
 		using (var changeScope = new EditorGUI.ChangeCheckScope()) {
 			searchText = searchField(searchText);
 
-			// 表示内容を更新
-			buildDrawEditors(changeScope.changed);
+
+			includeInvisibleProperty = EditorGUILayout.ToggleLeft("Include Invisible Properties", includeInvisibleProperty);
+			if (!!changeScope.changed) {
+				// 表示内容を更新
+				buildDrawEditors(changeScope.changed);
+			}
 		}
+
 		EditorGUILayout.Separator();
 		drawSeparator();
 
@@ -274,7 +280,7 @@ public class SearchableInspectorWindow : EditorWindow
 		var sameEditorCount = 0;
 		foreach (var editor in EditorTracker.activeEditors) {
 			if (activeEditorTable.ContainsKey(editor)) {
-				newActiveEditorTable.Add(editor, new ShowInspectorInfo(editor, activeEditorTable[editor].isShowCompontnt, activeEditorTable[editor].isFoldout, activeEditorTable[editor].showProperties));
+				newActiveEditorTable.Add(editor, new ShowInspectorInfo(editor, activeEditorTable[editor].isShowComponent, activeEditorTable[editor].isFoldout, activeEditorTable[editor].showProperties));
 				++sameEditorCount;
 			} else {
 				newActiveEditorTable.Add(editor, new ShowInspectorInfo(editor, true, true, new List<ShowPropertyInfo>()));
@@ -290,7 +296,7 @@ public class SearchableInspectorWindow : EditorWindow
 	void buildDrawEditors(bool isBuildFilteredProperties)
 	{
 		foreach (var editor in EditorTracker.activeEditors) {
-			var isShowComponent = activeEditorTable[editor].isShowCompontnt;
+			var isShowComponent = activeEditorTable[editor].isShowComponent;
 
 			if (editor.targets.Length != Selection.objects.Length) {
 				isShowComponent = false;
@@ -301,7 +307,7 @@ public class SearchableInspectorWindow : EditorWindow
 			} else if (string.IsNullOrEmpty(searchText)) {
 				isShowComponent = true; // 検索ボクスに何も入力されていないなら、表示確定
 			}
-			activeEditorTable[editor].isShowCompontnt = isShowComponent;
+			activeEditorTable[editor].isShowComponent = isShowComponent;
 		}
 	}
 
@@ -376,7 +382,7 @@ public class SearchableInspectorWindow : EditorWindow
 			}
 
 			var foldout = activeEditorTable[editor].isFoldout;
-			var isShowComponent = activeEditorTable[editor].isShowCompontnt;
+			var isShowComponent = activeEditorTable[editor].isShowComponent;
 			var showProperties = activeEditorTable[editor].showProperties;
 
 			if (!!isShowComponent) {
@@ -452,7 +458,7 @@ public class SearchableInspectorWindow : EditorWindow
 			getCustomEditorType(componentEditor, true) != null ||
 			componentEditor.targets.Length == 1) {
 			var propertyIterator = componentEditor.serializedObject.GetIterator();
-			if (propertyIterator.NextVisible(true)) {
+			if ((!includeInvisibleProperty ? propertyIterator.NextVisible(true) : propertyIterator.Next(true))) {
 				buildFileredProperties(propertyIterator, outViewProperties);
 			}
 		} else {
@@ -497,7 +503,7 @@ public class SearchableInspectorWindow : EditorWindow
 					++viewCount;
 				}
 			}
-		} while (iterator.NextVisible(false) && (oldDepth == iterator.depth));
+		} while ((!includeInvisibleProperty ? iterator.NextVisible(false) : iterator.Next(false)) && (oldDepth == iterator.depth));
 		return viewCount > 0;
 	}
 

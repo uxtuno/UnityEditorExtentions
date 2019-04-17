@@ -9,7 +9,7 @@
 	/// <summary>
 	/// Scene上のGameObjectを、指定したPrefabで置き換える エディタウインドウ
 	/// </summary>
-	public class PrefabReplaceWindow : EditorWindow
+	public class PrefabConnectorWindow : EditorWindow
 	{
 		/// <summary>
 		/// 置き換えるPrefab
@@ -20,16 +20,12 @@
 
 		Vector2 scrollPosition;
 
-		[MenuItem("Window/Prefab Replacer")]
+		[MenuItem("Window/Prefab Connector")]
 		static void ShowWindow()
 		{
-			GetWindow<PrefabReplaceWindow>();
+			var window = GetWindow<PrefabConnectorWindow>();
+			window.titleContent = new GUIContent("Prefab Connector");
 		}
-
-		/// <summary>
-		/// Key に指定したObjectを参照しているプロパティを特定するためのDictionary
-		/// </summary>
-		Dictionary<Object, List<SerializedProperty>> referenceMap = new Dictionary<Object, List<SerializedProperty>>();
 
 		void OnEnable()
 		{
@@ -41,108 +37,20 @@
 			};
 		}
 
-		/// <summary>
-		/// 引数に指定した、Object群を参照する、プロパティを特定するDictionaryを構築する
-		/// </summary>
-		/// <param name="referencedObjects"></param>
-		void buildReferenceMap(Object[] referencedObjects)  
-		{
-			var allComponents = Resources.FindObjectsOfTypeAll<Component>();
-			referenceMap.Clear();
-
-			foreach (var component in allComponents) {
-				// Scene上のオブジェクトのみ対象にする
-				if (!component.gameObject.scene.isLoaded) {
-					continue;
-				}
-
-				var serializedObject = new SerializedObject(component);
-				var iterator = serializedObject.GetIterator();
-				while (iterator.Next(true)) {
-					if (iterator.propertyType != SerializedPropertyType.ObjectReference || isSealedProperty(iterator.propertyPath)) {
-						continue;
-					}
-
-					foreach (var referencedObject in referencedObjects) {
-						// referencedObjectを参照しているプロパティをリストアップ
-						if (iterator.objectReferenceValue == referencedObject) {
-							if (!referenceMap.ContainsKey(referencedObject)) {
-								referenceMap.Add(referencedObject, new List<SerializedProperty>());
-							}
-							referenceMap[referencedObject].Add(iterator.Copy());
-						}
-					}
-				}
-			}
-		}
-
-		/// <summary>
-		/// Object構造を、パスでマッピング
-		/// </summary>
-		/// <param name="rootGameObject"></param>
-		/// <returns></returns>
-		void buildObjectPathMap(Object rootGameObject, string context, Dictionary<string, Object> outObjectPathTree)
-		{
-			var contextPath = context;
-			outObjectPathTree.Add(context, rootGameObject);
-
-			switch (rootGameObject) {
-				case GameObject gameObject:
-					var index = 0;
-					// コンポーネント列挙
-					foreach (var component in gameObject.GetComponents<Component>()) {
-						buildObjectPathMap(component, context + "/" + $"component[{index}]", outObjectPathTree);
-						++index;
-					}
-
-					index = 0;
-					// 子オブジェクト列挙
-					foreach (Transform child in gameObject.transform) {
-						buildObjectPathMap(child.gameObject, context + "/" + $"gameObject[{index}]", outObjectPathTree);
-						++index;
-					}
-
-					break;
-				default:
-					break;
-			}
-		}
-
-		/// <summary>
-		/// 指定したオブジェクトを参照しているプロパティを、新しいオブジェクトを参照するように置き換える
-		/// </summary>
-		/// <param name="referencedObjects"></param>
-		void replaceReference(Object referencedObject, Object replaceReference)
-		{
-			if (!referenceMap.ContainsKey(referencedObject)) {
-				return;
-			}
-
-			foreach (var property in referenceMap[referencedObject]) {
-				property.objectReferenceValue = replaceReference;
-			}
-		}
-
-		bool isSealedProperty(string path)
-		{
-			return path == "m_GameObject" ||
-				path == "m_FileID" ||
-				path.Contains("m_CorrespondingSourceObject") ||
-				path.Contains("m_PrefabInstance") ||
-				path.Contains("m_PrefabAsset") ||
-				path.Contains("m_Father") || 
-				path.Contains("m_Children"); 
-		}
-
 		void OnGUI()
 		{
-			replacePrefab = EditorGUILayout.ObjectField("Replace Prefab", replacePrefab, typeof(GameObject), true) as GameObject;
+			replacePrefab = EditorGUILayout.ObjectField("Connect Prefab", replacePrefab, typeof(GameObject), true) as GameObject;
+			if (!!replacePrefab && !PrefabUtility.IsPartOfPrefabAsset(replacePrefab)) {
+				replacePrefab = null;
+			}
 
 			EditorGUILayout.Space();
-			EditorGUILayout.LabelField("Replace GameObject Root Objects");
+			EditorGUILayout.LabelField("Connect Root GameObjects");
+
+			var referencedGameObjects = Selection.gameObjects.Where(gameObject => gameObject.scene.isLoaded).ToArray();
 
 			using (var scrollScope = new EditorGUILayout.ScrollViewScope(scrollPosition)) {
-				foreach (var target in Selection.gameObjects) {
+				foreach (var target in referencedGameObjects) {
 					using (new EditorGUI.DisabledGroupScope(true)) {
 						EditorGUILayout.ObjectField(target, typeof(GameObject), true);
 					}
@@ -152,14 +60,18 @@
 			}
 
 			if (GUILayout.Button("Connect")) {
-				var objects = EditorUtility.CollectDeepHierarchy(Selection.gameObjects);
-				buildReferenceMap(objects);
+				var objects = EditorUtility.CollectDeepHierarchy(referencedGameObjects);
+
+				var referenceMap = new Dictionary<Object, List<SerializedProperty>>();
+				referenceMap = EditorExtentionUtility.buildReferenceMap(objects);
 
 				// Applyが必要な、SerializedObject
 				var applySerializedObjects = new HashSet<SerializedObject>();
 
 				foreach (var replaceObject in Selection.gameObjects) {
 					var instancedPrefab = PrefabUtility.InstantiatePrefab(replacePrefab) as GameObject;
+					Undo.RegisterCreatedObjectUndo(instancedPrefab, "Create");
+
 					instancedPrefab.transform.SetParent(replaceObject.transform.parent);
 					instancedPrefab.transform.SetSiblingIndex(replaceObject.transform.GetSiblingIndex());
 
@@ -172,9 +84,9 @@
 					GatheringProperties(replaceObject, replaceObject, "", outReplaceObjectProperties, outProcessedObjtects);
 
 					var replaceObjectPathMap = new Dictionary<string, Object>();
-					buildObjectPathMap(replaceObject, string.Empty, replaceObjectPathMap);
+					EditorExtentionUtility.buildObjectPathMap(replaceObject, string.Empty, replaceObjectPathMap);
 					var instancedPrefabPathMap = new Dictionary<string, Object>();
-					buildObjectPathMap(instancedPrefab, string.Empty, instancedPrefabPathMap);
+					EditorExtentionUtility.buildObjectPathMap(instancedPrefab, string.Empty, instancedPrefabPathMap);
 
 					// 参照を置換
 					foreach (var item in replaceObjectPathMap) {
@@ -271,7 +183,7 @@
 						}
 					}
 
-					DestroyImmediate(replaceObject);
+					Undo.DestroyObjectImmediate(replaceObject);
 				}
 				// Apply が必要な、SerializedObjectを最後に一気にApplyする
 				foreach (var item in applySerializedObjects) {

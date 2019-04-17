@@ -84,7 +84,6 @@
 		void buildObjectPathMap(Object rootGameObject, string context, Dictionary<string, Object> outObjectPathTree)
 		{
 			var contextPath = context;
-			Debug.Log(context);
 			outObjectPathTree.Add(context, rootGameObject);
 
 			switch (rootGameObject) {
@@ -153,14 +152,8 @@
 			}
 
 			if (GUILayout.Button("Connect")) {
-				var objects = EditorUtility.CollectDeepHierarchy(new Object[] { Selection.activeGameObject });
+				var objects = EditorUtility.CollectDeepHierarchy(Selection.gameObjects);
 				buildReferenceMap(objects);
-
-				foreach (var item in referenceMap) {
-					foreach (var value in item.Value) {
-						Debug.Log(value.propertyPath);
-					}
-				}
 
 				// Applyが必要な、SerializedObject
 				var applySerializedObjects = new HashSet<SerializedObject>();

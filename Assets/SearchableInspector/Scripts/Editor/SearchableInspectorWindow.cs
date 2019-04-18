@@ -279,6 +279,10 @@ public class SearchableInspectorWindow : EditorWindow
 		// 以前の更新時と、変化していない Editor の数
 		var sameEditorCount = 0;
 		foreach (var editor in EditorTracker.activeEditors) {
+			if (!editor) {
+				continue;
+			}
+
 			if (activeEditorTable.ContainsKey(editor)) {
 				newActiveEditorTable.Add(editor, new ShowInspectorInfo(editor, activeEditorTable[editor].isShowComponent, activeEditorTable[editor].isFoldout, activeEditorTable[editor].showProperties));
 				++sameEditorCount;

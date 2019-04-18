@@ -300,6 +300,10 @@ public class SearchableInspectorWindow : EditorWindow
 	void buildDrawEditors(bool isBuildFilteredProperties)
 	{
 		foreach (var editor in EditorTracker.activeEditors) {
+			if (!editor) {
+				continue;
+			}
+
 			var isShowComponent = activeEditorTable[editor].isShowComponent;
 
 			if (editor.targets.Length != Selection.objects.Length) {

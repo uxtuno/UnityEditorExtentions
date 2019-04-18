@@ -114,6 +114,10 @@ public class ReferenceSearchWindow : EditorWindow
 					}
 
 					foreach (var hitInfo in hitGroup) {
+						if (!hitInfo.property.serializedObject.targetObject) {
+							continue;
+						}
+
 						EditorGUI.indentLevel = 1;
 						using (new EditorGUILayout.HorizontalScope()) {
 							hitInfo.property.serializedObject.Update();
@@ -176,7 +180,6 @@ public class ReferenceSearchWindow : EditorWindow
 				hitInfoList.Add(info);
 			}
 		}
-
 	}
 
 	/// <summary>

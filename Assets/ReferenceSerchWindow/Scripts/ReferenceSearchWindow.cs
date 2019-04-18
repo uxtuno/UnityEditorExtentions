@@ -26,6 +26,7 @@ public class ReferenceSearchWindow : EditorWindow
 
 	class SearchHitInfo
 	{
+		public bool isActive;
 		public GameObject hitGameObject;
 		public SerializedProperty property;
 	}
@@ -46,10 +47,14 @@ public class ReferenceSearchWindow : EditorWindow
 	bool includeSubObject = true;
 
 	/// <summary>
-	/// 非表示のプロパティを含むか
+	/// プロパティのパスを表示する
+	/// false なら、DisplayNameを表示する
 	/// </summary>
-	bool includeInvisibleProperties = false;
+	bool showPropertyPath = true;
 
+	/// <summary>
+	/// Object をKeyに、そのObjectを参照しているプロパティのリストにアクセスするためのDictionary
+	/// </summary>
 	Dictionary<Object, List<SerializedProperty>> referenceMap;
 
 	void OnEnable()
@@ -78,41 +83,22 @@ public class ReferenceSearchWindow : EditorWindow
 
 		using (var changeScope = new EditorGUI.ChangeCheckScope()) {
 			referencedObject = EditorGUILayout.ObjectField("Referenced Object", referencedObject, typeof(Object), true, GUILayout.ExpandWidth(true));
-			replaceReference = EditorGUILayout.ObjectField("Replace Reference", replaceReference, typeof(Object), true, GUILayout.ExpandWidth(true));
-			includeSubObject = EditorGUILayout.Toggle("Include Component", includeSubObject);
-			includeInvisibleProperties = EditorGUILayout.Toggle("Include Invisible Properties", includeInvisibleProperties);
-
 			if (!!changeScope.changed) {
 				updateSearch();
 			}
 		}
 
-		// 置換は、安全のため表示プロパティのみに有効
-		if (!includeInvisibleProperties && GUILayout.Button("Replace")) {
-			var gameObjects = Resources.FindObjectsOfTypeAll<GameObject>();
-			foreach (var gameObject in gameObjects) {
-				foreach (var component in gameObject.GetComponents<Component>()) {
-					var serializedObject = new SerializedObject(component);
-					var iterator = serializedObject.GetIterator();
-					iterator.NextVisible(true);
-					while (iterator.NextVisible(true)) {
-						if (iterator.propertyType == SerializedPropertyType.ObjectReference) {
-							var isComponentHitted =
-							((referencedObject is GameObject) &&
-							!!includeSubObject &&
-							((GameObject)referencedObject).GetComponents<Component>().Any(item => item == iterator.objectReferenceValue));
-							if ((iterator.objectReferenceValue == referencedObject || !!isComponentHitted) &&
-								iterator.objectReferenceValue != gameObject) {
-								Debug.Log($"Replace {iterator.propertyPath} {iterator.objectReferenceValue} -> {replaceReference}");
-								iterator.objectReferenceValue = replaceReference;
-							}
-						}
-					}
-					serializedObject.ApplyModifiedProperties();
+		replaceReference = EditorGUILayout.ObjectField("Replace Reference", replaceReference, typeof(Object), true, GUILayout.ExpandWidth(true));
+		includeSubObject = EditorGUILayout.Toggle("Include Sub Objects", includeSubObject);
+		showPropertyPath = EditorGUILayout.Toggle("Show Property Path", showPropertyPath);
+
+		if (GUILayout.Button("Replace")) {
+			foreach (var hitInfo in hitInfoList) {
+				if (!!hitInfo.isActive) {
+					hitInfo.property.objectReferenceValue = replaceReference;
+					hitInfo.property.serializedObject.ApplyModifiedProperties();
 				}
 			}
-
-			updateSearch();
 		}
 		drawSeparator();
 
@@ -128,14 +114,25 @@ public class ReferenceSearchWindow : EditorWindow
 					}
 
 					foreach (var hitInfo in hitGroup) {
-
-
 						EditorGUI.indentLevel = 1;
-						EditorGUILayout.PropertyField(hitInfo.property, new GUIContent(hitInfo.property.propertyPath), true);
+						using (new EditorGUILayout.HorizontalScope()) {
+							hitInfo.property.serializedObject.Update();
 
+							using (var changeScope = new EditorGUI.ChangeCheckScope()) {
+								if (!!showPropertyPath) {
+									EditorGUILayout.PropertyField(hitInfo.property, new GUIContent(hitInfo.property.propertyPath), true);
+								}
+								else {
+									EditorGUILayout.PropertyField(hitInfo.property, new GUIContent(hitInfo.property.displayName), true);
+								}
+
+								if (!!changeScope.changed) {
+									hitInfo.property.serializedObject.ApplyModifiedProperties();
+								}
+							}
+							hitInfo.isActive = EditorGUILayout.ToggleLeft("", hitInfo.isActive, GUILayout.Width(30.0f));
+						}
 					}
-
-					//EditorGUILayout.TextArea(hitInfo.hitProperty, GUILayout.Width(Screen.width / 2.0f - 6.0f));
 				}
 			}
 
@@ -174,10 +171,9 @@ public class ReferenceSearchWindow : EditorWindow
 						break;
 				}
 
+				info.isActive = true;
 				info.property = item2;
 				hitInfoList.Add(info);
-				//info.hitGameObject =
-				Debug.Log(item2.propertyPath);
 			}
 		}
 
@@ -195,15 +191,5 @@ public class ReferenceSearchWindow : EditorWindow
 		lineStyle.margin.left = lineStyle.margin.right = 0;
 		lineStyle.padding.left = lineStyle.padding.right = 0;
 		GUILayout.Box(GUIContent.none, lineStyle, GUILayout.ExpandWidth(true), GUILayout.Height(1f));
-	}
-
-	/// <summary>
-	/// includeInvisibleProperties を見て、イテレータを進める
-	/// </summary>
-	/// <param name="iterator"></param>
-	/// <returns></returns>
-	bool conditionalIteratorNext(SerializedProperty iterator)
-	{
-		return includeInvisibleProperties ? iterator.Next(true) : iterator.NextVisible(true);
 	}
 }

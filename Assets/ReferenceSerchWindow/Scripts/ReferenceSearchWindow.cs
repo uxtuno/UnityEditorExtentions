@@ -27,9 +27,7 @@ public class ReferenceSearchWindow : EditorWindow
 	class SearchHitInfo
 	{
 		public GameObject hitGameObject;
-		public Object referObject;
-		public string hitProperty;
-		public string hitPropertyPath;
+		public SerializedProperty property;
 	}
 
 	/// <summary>
@@ -45,12 +43,14 @@ public class ReferenceSearchWindow : EditorWindow
 	/// <summary>
 	/// searchObject に指定したGameObjectのコンポーネントを含めて検索する
 	/// </summary>
-	bool includeComponent = true;
+	bool includeSubObject = true;
 
 	/// <summary>
 	/// 非表示のプロパティを含むか
 	/// </summary>
 	bool includeInvisibleProperties = false;
+
+	Dictionary<Object, List<SerializedProperty>> referenceMap;
 
 	void OnEnable()
 	{
@@ -74,10 +74,12 @@ public class ReferenceSearchWindow : EditorWindow
 				break;
 		}
 
+		EditorGUIUtility.labelWidth = Screen.width / 2.0f - 8.0f;
+
 		using (var changeScope = new EditorGUI.ChangeCheckScope()) {
-			referencedObject = EditorGUILayout.ObjectField("Referenced Object", referencedObject, typeof(Object), true);
-			replaceReference = EditorGUILayout.ObjectField("Replace Reference", replaceReference, typeof(Object), true);
-			includeComponent = EditorGUILayout.Toggle("Include Component", includeComponent);
+			referencedObject = EditorGUILayout.ObjectField("Referenced Object", referencedObject, typeof(Object), true, GUILayout.ExpandWidth(true));
+			replaceReference = EditorGUILayout.ObjectField("Replace Reference", replaceReference, typeof(Object), true, GUILayout.ExpandWidth(true));
+			includeSubObject = EditorGUILayout.Toggle("Include Component", includeSubObject);
 			includeInvisibleProperties = EditorGUILayout.Toggle("Include Invisible Properties", includeInvisibleProperties);
 
 			if (!!changeScope.changed) {
@@ -97,9 +99,8 @@ public class ReferenceSearchWindow : EditorWindow
 						if (iterator.propertyType == SerializedPropertyType.ObjectReference) {
 							var isComponentHitted =
 							((referencedObject is GameObject) &&
-							!!includeComponent &&
+							!!includeSubObject &&
 							((GameObject)referencedObject).GetComponents<Component>().Any(item => item == iterator.objectReferenceValue));
-
 							if ((iterator.objectReferenceValue == referencedObject || !!isComponentHitted) &&
 								iterator.objectReferenceValue != gameObject) {
 								Debug.Log($"Replace {iterator.propertyPath} {iterator.objectReferenceValue} -> {replaceReference}");
@@ -118,18 +119,23 @@ public class ReferenceSearchWindow : EditorWindow
 		using (var scrollViewScope = new EditorGUILayout.ScrollViewScope(scrollPosition)) {
 			if (!!referencedObject) {
 
-				foreach (var hitInfo in hitInfoList) {
-					var content = EditorGUIUtility.ObjectContent(hitInfo.hitGameObject, typeof(GameObject));
-					content.text += " (" + hitInfo.hitPropertyPath + ")";
-
-					using (var horizontal = new EditorGUILayout.HorizontalScope()) {
-						if (GUILayout.Button(content, EditorStyles.label, GUILayout.Height(EditorGUIUtility.singleLineHeight), GUILayout.Width(Screen.width / 2.0f - 6.0f))) {
-							EditorGUIUtility.PingObject(hitInfo.hitGameObject);
-							Selection.activeGameObject = hitInfo.hitGameObject;
-						}
-
-						EditorGUILayout.TextArea(hitInfo.hitProperty, GUILayout.Width(Screen.width / 2.0f - 6.0f));
+				foreach (var hitGroup in hitInfoList.GroupBy(hitInfo => hitInfo.hitGameObject)) {
+					var content = EditorGUIUtility.ObjectContent(hitGroup.Key, typeof(GameObject));
+					EditorGUI.indentLevel = 0;
+					if (GUILayout.Button(content, EditorStyles.label, GUILayout.Height(EditorGUIUtility.singleLineHeight), GUILayout.Width(Screen.width / 2.0f - 6.0f))) {
+						EditorGUIUtility.PingObject(hitGroup.Key);
+						Selection.activeGameObject = hitGroup.Key;
 					}
+
+					foreach (var hitInfo in hitGroup) {
+
+
+						EditorGUI.indentLevel = 1;
+						EditorGUILayout.PropertyField(hitInfo.property, new GUIContent(hitInfo.property.propertyPath), true);
+
+					}
+
+					//EditorGUILayout.TextArea(hitInfo.hitProperty, GUILayout.Width(Screen.width / 2.0f - 6.0f));
 				}
 			}
 
@@ -143,40 +149,38 @@ public class ReferenceSearchWindow : EditorWindow
 
 	void updateSearch()
 	{
-		var gameObjects = Resources.FindObjectsOfTypeAll<GameObject>();
 		hitInfoList.Clear();
-		foreach (var gameObject in gameObjects) {
-			foreach (var component in gameObject.GetComponents<Component>()) {
-				if (!component) {
-					continue;
-				}
-				var serializedObject = new SerializedObject(component);
-				var iterator = serializedObject.GetIterator();
-				if (!conditionalIteratorNext(iterator)) {
-					continue;
-				}
-				while (conditionalIteratorNext(iterator)) {
-					if (iterator.propertyType == SerializedPropertyType.ObjectReference) {
-						// GameObjectの場合は、アタッチされているコンポーネントも検索対象に含める
-						var isComponentHitted =
-							((referencedObject is GameObject) &&
-							!!includeComponent &&
-							((GameObject)referencedObject).GetComponents<Component>().Any(item => item == iterator.objectReferenceValue));
 
-						if ((!!gameObject && gameObject.scene != null && gameObject.scene.isLoaded) &&
-							(iterator.objectReferenceValue == referencedObject || !!isComponentHitted) &&
-							iterator.name != "m_GameObject") {
-							var hitInfo = new SearchHitInfo();
-							hitInfo.hitGameObject = gameObject;
-							hitInfo.referObject = iterator.objectReferenceValue;
-							hitInfo.hitProperty = iterator.propertyPath;
-							hitInfo.hitPropertyPath = string.Format($"{iterator.serializedObject.targetObject.GetType()}");
-							hitInfoList.Add(hitInfo);
-						}
-					}
+		Object[] targetObjects = null;
+		if (!!includeSubObject) {
+			targetObjects = EditorUtility.CollectDeepHierarchy(new Object[] { referencedObject });
+		} else {
+			targetObjects = new Object[] { referencedObject };
+		}
+
+		referenceMap = EditorExtentionUtility.buildReferenceMap(targetObjects);
+		foreach (var item in referenceMap) {
+			foreach (var item2 in item.Value) {
+				SearchHitInfo info = new SearchHitInfo();
+
+				switch (item2.serializedObject.targetObject) {
+					case Component component:
+						info.hitGameObject = component.gameObject;
+						break;
+					case GameObject gameObject:
+						info.hitGameObject = gameObject;
+						break;
+					default:
+						break;
 				}
+
+				info.property = item2;
+				hitInfoList.Add(info);
+				//info.hitGameObject =
+				Debug.Log(item2.propertyPath);
 			}
 		}
+
 	}
 
 	/// <summary>

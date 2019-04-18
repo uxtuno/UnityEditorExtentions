@@ -20,6 +20,11 @@
 
 		Vector2 scrollPosition;
 
+		/// <summary>
+		/// 既存のPrefabAssetを選択中のオブジェクトで置き換えるモードかどうか
+		/// </summary>
+		bool isReplaceMode;
+
 		[MenuItem("Window/Prefab Connector")]
 		static void ShowWindow()
 		{
@@ -40,14 +45,25 @@
 		void OnGUI()
 		{
 			replacePrefab = EditorGUILayout.ObjectField("Connect Prefab", replacePrefab, typeof(GameObject), true) as GameObject;
+			isReplaceMode = EditorGUILayout.Toggle("Replace Mode", isReplaceMode);
 			if (!!replacePrefab && !PrefabUtility.IsPartOfPrefabAsset(replacePrefab)) {
 				replacePrefab = null;
 			}
 
 			EditorGUILayout.Space();
-			EditorGUILayout.LabelField("Connect Root GameObjects");
+			EditorGUILayout.LabelField("Select Root GameObjects");
 
-			var referencedGameObjects = Selection.gameObjects.Where(gameObject => gameObject.scene.isLoaded).ToArray();
+			var referencedGameObjects = Selection.gameObjects.Where(gameObject => gameObject.scene.isLoaded &&
+				 Selection.gameObjects.All(gameObject_2 => {
+					 // 親をたどっていく
+					 for (var parent = gameObject.transform.parent; parent != null; parent = parent.parent) {
+						 if (parent == gameObject_2.transform) {
+							 return false;
+						 }
+					 }
+					 return true;
+				 }) // 親オブジェクトが、選択中のGameObjectの中にないものだけ列挙
+				 ).ToArray();
 
 			using (var scrollScope = new EditorGUILayout.ScrollViewScope(scrollPosition)) {
 				foreach (var target in referencedGameObjects) {
@@ -60,6 +76,11 @@
 			}
 
 			if (GUILayout.Button("Connect")) {
+				if (!!isReplaceMode) {
+					PrefabUtility.SaveAsPrefabAssetAndConnect(Selection.activeGameObject, PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(replacePrefab), InteractionMode.AutomatedAction);
+					return;
+				}
+
 				var objects = EditorUtility.CollectDeepHierarchy(referencedGameObjects);
 
 				var referenceMap = new Dictionary<Object, List<SerializedProperty>>();
@@ -68,7 +89,7 @@
 				// Applyが必要な、SerializedObject
 				var applySerializedObjects = new HashSet<SerializedObject>();
 
-				foreach (var replaceObject in Selection.gameObjects) {
+				foreach (var replaceObject in referencedGameObjects) {
 					var instancedPrefab = PrefabUtility.InstantiatePrefab(replacePrefab) as GameObject;
 					Undo.RegisterCreatedObjectUndo(instancedPrefab, "Create");
 
